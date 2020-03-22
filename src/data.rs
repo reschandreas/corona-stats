@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 
-
 const URL_DAILY_REPORT: &str = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/";
 const URL_TIME_SERIES: &str = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-";
 
@@ -85,7 +84,7 @@ pub fn get_data() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn get_series() -> Result<(), Box <dyn Error>> {
+pub fn get_series() -> Result<(), Box<dyn Error>> {
     for elem in get_time_series()?.iter() {
         println!("{:?}", elem);
     }
