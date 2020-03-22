@@ -1,11 +1,14 @@
-use chrono::{NaiveDateTime, NaiveDate, Datelike, Utc, Timelike};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike, Utc};
 use csv::{ReaderBuilder, StringRecord};
-use serde::Deserialize;
 use serde::de;
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::fmt;
 
 //https://stackoverflow.com/questions/57614558/how-to-use-custom-serde-deserializer-for-chrono-timestamps
 struct NaiveDateTimeVisitor;
+
+const URL_DAILY_REPORT: &str = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/";
 
 impl<'de> de::Visitor<'de> for NaiveDateTimeVisitor {
     type Value = NaiveDateTime;
@@ -43,7 +46,7 @@ struct CsvRecord {
     long: Option<f32>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct Record {
     province: String,
     country: String,
@@ -57,27 +60,28 @@ struct Record {
 }
 
 pub fn get_data() -> Result<(), Box<dyn std::error::Error>> {
+    let mut map = HashMap::new();
+
     for elem in get_dates().iter() {
         for e in get_data_from(elem)?.iter() {
-            println!("{:?}", e);
+            let entry = map.entry(e.country.clone()).or_insert(Vec::new());
+            entry.push(e.clone());
         }
     }
-    Ok(()) 
+    println!("{:?}", map);
+    Ok(())
 }
 
 #[tokio::main]
 async fn get_data_from(date: &NaiveDate) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
     let mut data = Vec::new();
-    let url = format!("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/{}.csv", date.format("%m-%d-%Y"));
+    let url = format!("{}{}.csv", URL_DAILY_REPORT, date.format("%m-%d-%Y"));
     //println!("{:?}", url);
-    let body = reqwest::get(&url)
-        .await?
-        .text()
-        .await?;
+    let body = reqwest::get(&url).await?.text().await?;
 
     let mut rdr = ReaderBuilder::new()
-                    .delimiter(b',')
-                    .from_reader(body.as_bytes());
+        .delimiter(b',')
+        .from_reader(body.as_bytes());
 
     for result in rdr.records() {
         let row: Record = to_record(normalize(result?));
@@ -89,52 +93,52 @@ async fn get_data_from(date: &NaiveDate) -> Result<Vec<Record>, Box<dyn std::err
 fn normalize(record: StringRecord) -> CsvRecord {
     CsvRecord {
         province: match record.get(0) {
-                    Some(t) => t.to_string(),
-                    None => "".to_string(),
-                },
+            Some(t) => t.to_string(),
+            None => "".to_string(),
+        },
         country: match record.get(1) {
-                    Some(t) => t.to_string(),
-                    None => "".to_string(),
-                },
+            Some(t) => t.to_string(),
+            None => "".to_string(),
+        },
         updated: match record.get(2) {
-                    Some(t) => t.to_string(),
-                    None => "".to_string(),
-                },
+            Some(t) => t.to_string(),
+            None => "".to_string(),
+        },
         confirmed: match record.get(3) {
-                    Some(t) => match t.to_string().parse::<u32>() {
-                        Ok(t) => t,
-                        Err(_) => 0,
-                    },
-                    None => 0,
-                },
+            Some(t) => match t.to_string().parse::<u32>() {
+                Ok(t) => t,
+                Err(_) => 0,
+            },
+            None => 0,
+        },
         deaths: match record.get(4) {
-                    Some(t) => match t.to_string().parse::<u32>() {
-                        Ok(t) => t,
-                        Err(_) => 0,
-                    },
-                    None => 0,
-                },
+            Some(t) => match t.to_string().parse::<u32>() {
+                Ok(t) => t,
+                Err(_) => 0,
+            },
+            None => 0,
+        },
         recovered: match record.get(5) {
-                    Some(t) => match t.to_string().parse::<u32>() {
-                        Ok(t) => t,
-                        Err(_) => 0,
-                    },
-                    None => 0,
-                },
+            Some(t) => match t.to_string().parse::<u32>() {
+                Ok(t) => t,
+                Err(_) => 0,
+            },
+            None => 0,
+        },
         lat: match record.get(6) {
-                    Some(t) => match t.to_string().parse::<f32>() {
-                        Ok(t) => Some(t),
-                        Err(_) => None::<f32>,
-                    },
-                    None => None::<f32>,
-                },
+            Some(t) => match t.to_string().parse::<f32>() {
+                Ok(t) => Some(t),
+                Err(_) => None::<f32>,
+            },
+            None => None::<f32>,
+        },
         long: match record.get(7) {
-                    Some(t) => match t.to_string().parse::<f32>() {
-                        Ok(t) => Some(t),
-                        Err(_) => None::<f32>,
-                    },
-                    None => None::<f32>,
-                },
+            Some(t) => match t.to_string().parse::<f32>() {
+                Ok(t) => Some(t),
+                Err(_) => None::<f32>,
+            },
+            None => None::<f32>,
+        },
     }
 }
 
@@ -152,13 +156,26 @@ fn to_record(record: CsvRecord) -> Record {
 }
 
 fn parse_date(s: String) -> NaiveDateTime {
-    for format in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%m/%d%y %H:%M", "%m/%d/%Y %H:%M"].iter() {
+    for format in [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%m/%d%y %H:%M",
+        "%m/%d/%Y %H:%M",
+    ]
+    .iter()
+    {
         match NaiveDateTime::parse_from_str(&s, format) {
-            Ok(t) => if t.year() < 2000 {
-                        return NaiveDate::from_ymd(t.year() + 2000, t.month(), t.day()).and_hms(t.hour(), t.minute(), t.second());
-                    } else {
-                        return t;
-                    },
+            Ok(t) => {
+                if t.year() < 2000 {
+                    return NaiveDate::from_ymd(t.year() + 2000, t.month(), t.day()).and_hms(
+                        t.hour(),
+                        t.minute(),
+                        t.second(),
+                    );
+                } else {
+                    return t;
+                }
+            }
             Err(_) => (),
         }
     }
@@ -176,7 +193,6 @@ fn get_dates() -> Vec<NaiveDate> {
         dates.push(date);
         date = date.succ();
     }
-    
+
     dates
 }
-
