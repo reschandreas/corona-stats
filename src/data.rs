@@ -3,12 +3,15 @@ use csv::{ReaderBuilder, StringRecord};
 use serde::de;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt;
+
+
+const URL_DAILY_REPORT: &str = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/";
+const URL_TIME_SERIES: &str = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-";
 
 //https://stackoverflow.com/questions/57614558/how-to-use-custom-serde-deserializer-for-chrono-timestamps
 struct NaiveDateTimeVisitor;
-
-const URL_DAILY_REPORT: &str = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/";
 
 impl<'de> de::Visitor<'de> for NaiveDateTimeVisitor {
     type Value = NaiveDateTime;
@@ -59,7 +62,17 @@ struct Record {
     long: Option<f32>,
 }
 
-pub fn get_data() -> Result<(), Box<dyn std::error::Error>> {
+#[derive(Debug, Clone)]
+struct TimeSeries {
+    province: String,
+    country: String,
+    lat: Option<f32>,
+    long: Option<f32>,
+    data: HashMap<String, u32>,
+    state: String,
+}
+
+pub fn get_data() -> Result<(), Box<dyn Error>> {
     let mut map = HashMap::new();
 
     for elem in get_dates().iter() {
@@ -72,8 +85,15 @@ pub fn get_data() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+pub fn get_series() -> Result<(), Box <dyn Error>> {
+    for elem in get_time_series()?.iter() {
+        println!("{:?}", elem);
+    }
+    Ok(())
+}
+
 #[tokio::main]
-async fn get_data_from(date: &NaiveDate) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
+async fn get_data_from(date: &NaiveDate) -> Result<Vec<Record>, Box<dyn Error>> {
     let mut data = Vec::new();
     let url = format!("{}{}.csv", URL_DAILY_REPORT, date.format("%m-%d-%Y"));
     //println!("{:?}", url);
@@ -195,4 +215,66 @@ fn get_dates() -> Vec<NaiveDate> {
     }
 
     dates
+}
+
+#[tokio::main]
+async fn get_time_series() -> Result<Vec<TimeSeries>, Box<dyn Error>> {
+    let mut series = Vec::new();
+
+    for state in ["Confirmed", "Deaths", "Recovered"].iter() {
+        let url = format!("{}{}.csv", URL_TIME_SERIES, state);
+        println!("{:?}", url);
+        let body = reqwest::get(&url).await?.text().await?;
+
+        let mut rdr = ReaderBuilder::new()
+            .delimiter(b',')
+            .from_reader(body.as_bytes());
+
+        for rlt in rdr.records() {
+            let result: StringRecord = rlt?;
+            let mut record = TimeSeries {
+                province: match result.get(0) {
+                    Some(t) => t.to_string(),
+                    None => "".to_string(),
+                },
+                country: match result.get(1) {
+                    Some(t) => t.to_string(),
+                    None => "".to_string(),
+                },
+                lat: match result.get(2) {
+                    Some(t) => match t.to_string().parse::<f32>() {
+                        Ok(t) => Some(t),
+                        Err(_) => None::<f32>,
+                    },
+                    None => None::<f32>,
+                },
+                long: match result.get(3) {
+                    Some(t) => match t.to_string().parse::<f32>() {
+                        Ok(t) => Some(t),
+                        Err(_) => None::<f32>,
+                    },
+                    None => None::<f32>,
+                },
+                data: HashMap::new(),
+                state: state.to_string(),
+            };
+            let mut index = 4;
+            let mut date = NaiveDate::from_ymd(2020, 1, 22);
+            loop {
+                let entry = record.data.entry(date.to_string()).or_insert(10);
+                *entry = match result.get(index) {
+                    Some(t) => match t.to_string().parse::<u32>() {
+                        Ok(t) => t,
+                        Err(_) => 1,
+                    },
+                    None => break,
+                };
+                index += 1;
+                date = date.succ();
+            }
+            series.push(record);
+        }
+    }
+
+    Ok(series)
 }
