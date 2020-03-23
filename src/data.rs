@@ -2,7 +2,7 @@ use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike, Utc};
 use csv::{ReaderBuilder, StringRecord};
 use serde::de;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt;
 
@@ -67,7 +67,7 @@ struct TimeSeries {
     country: String,
     lat: Option<f32>,
     long: Option<f32>,
-    data: HashMap<String, u32>,
+    data: BTreeMap<String, i32>,
     state: String,
 }
 
@@ -86,7 +86,13 @@ pub fn get_data() -> Result<(), Box<dyn Error>> {
 
 pub fn get_series() -> Result<(), Box<dyn Error>> {
     for elem in get_time_series()?.iter() {
-        println!("{:?}", elem);
+        if elem.country == "Italy" {
+            println!("{:?}", elem.country);
+            for d in elem.data.iter() {
+                println!("{:?}", d);
+            }
+            //println!("{:?}", elem);
+        }    
     }
     Ok(())
 }
@@ -95,7 +101,7 @@ pub fn get_series() -> Result<(), Box<dyn Error>> {
 async fn get_data_from(date: &NaiveDate) -> Result<Vec<Record>, Box<dyn Error>> {
     let mut data = Vec::new();
     let url = format!("{}{}.csv", URL_DAILY_REPORT, date.format("%m-%d-%Y"));
-    //println!("{:?}", url);
+    
     let body = reqwest::get(&url).await?.text().await?;
 
     let mut rdr = ReaderBuilder::new()
@@ -222,7 +228,7 @@ async fn get_time_series() -> Result<Vec<TimeSeries>, Box<dyn Error>> {
 
     for state in ["Confirmed", "Deaths", "Recovered"].iter() {
         let url = format!("{}{}.csv", URL_TIME_SERIES, state);
-        println!("{:?}", url);
+        
         let body = reqwest::get(&url).await?.text().await?;
 
         let mut rdr = ReaderBuilder::new()
@@ -254,20 +260,22 @@ async fn get_time_series() -> Result<Vec<TimeSeries>, Box<dyn Error>> {
                     },
                     None => None::<f32>,
                 },
-                data: HashMap::new(),
+                data: BTreeMap::new(),
                 state: state.to_string(),
             };
             let mut index = 4;
             let mut date = NaiveDate::from_ymd(2020, 1, 22);
             loop {
-                let entry = record.data.entry(date.to_string()).or_insert(10);
-                *entry = match result.get(index) {
-                    Some(t) => match t.to_string().parse::<u32>() {
+                record.data.insert(date.to_string(), match result.get(index) {
+                    Some(t) => match t.to_string().parse::<i32>() {
                         Ok(t) => t,
-                        Err(_) => 1,
+                        Err(_) => -1,
                     },
                     None => break,
-                };
+                });
+                if *record.data.get(&date.to_string()).unwrap() < 0 {
+                    record.data.remove(&date.to_string());
+                }
                 index += 1;
                 date = date.succ();
             }
